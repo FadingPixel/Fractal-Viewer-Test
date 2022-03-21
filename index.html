@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="X-UA-Compatible" content="ie=edge">
+        <title>Fractal Explorer</title>
+
+        <link rel="stylesheet" href="style.css">
+        <link rel="stylesheet" href="mathquill\mathquill-basic.css"/>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.0/jquery.min.js"></script>
+        <script src="mathquill\mathquill-basic.js"></script>
+        <script src="utils.js" defer></script>
+        <script src="loadFiles.js" defer></script>
+        <script src="glscript.js" defer></script>
+        <script src="script.js" defer></script>
+        <script src="menu.js" defer></script>
+    </head>
+    <body>
+        <div id="container">
+            <div id="sidebar">
+                <div id="clickbar"></div>
+            </div>
+            <div id="canvas-container">
+                <canvas width=10 height=10 id="canvas" z-index=1 nocontextmenu oncontextmenu="false"></canvas>
+                <canvas width=10 height=10 id="overlay-canvas" z-index=2 nocontextmenu oncontextmenu="false"></canvas>
+            </div>
+        </div>
+    </body>
+    <!-- Setup (Included in all) -->
+    <script id="uniforms.glsl" type="not/js">
+        uniform float u_time;
+        uniform vec4 u_view;
+        uniform vec2 u_pxsz;
+        uniform vec2 u_mouse;
+        uniform vec2 u_mdown;
+        uniform vec2 u_rmdown;
+        varying vec2 v_pos;
+    </script>
+    <script id="spaceConversions.glsl" type="not/js">
+        vec2 clipToCoord(vec2 clip) {
+            return u_view.xy + u_view.zw * clip * 0.5;
+        }
+    </script>
+    <script id="vertMain.glsl" type="not/js">
+        attribute vec4 a_pos;
+        void main() {
+            v_pos = clipToCoord(a_pos.xy);
+            gl_Position = a_pos;
+        }
+    </script>
+    <script id="fragEnd.glsl" type="not/js">
+        gl_FragColor = vec4(color, 1.0);}
+    </script>
+    <script id="complexMath.glsl" type="not/js">
+        vec2 cPowN( vec2 c, float n ) {
+            float t = atan(c.y, c.x) * n;
+            float r = sqrt(c.x * c.x + c.y * c.y);
+            return pow(r,n) * vec2(cos(t), sin(t));
+        }
+        
+        vec2 ePowC( vec2 c ) {
+            return exp(c.x) * vec2(cos(c.y), sin(c.y));
+        }
+        
+        vec2 cMul( vec2 a, vec2 b) {
+            return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+        }
+        
+        vec2 cPowC( vec2 a, vec2 b ) {
+            float r = sqrt(a.x * a.x + a.y * a.y);
+            float lnr = log(r) * b.y;
+            return pow(r, b.x) * cMul(
+                    ePowC(vec2(-b.y, b.x) * atan(a.y, a.x)),
+                    vec2(cos(lnr), sin(lnr))
+                   );
+        }
+        
+        vec2 cPMul( vec2 a, vec2 b) {
+            return vec2(a.x * b.x, a.y * b.y);
+        }
+        
+        vec2 cPSq( vec2 z ) {
+            return vec2(z.x * z.x, z.y * z.y);
+        }
+        
+        vec2 cInv( vec2 x ) {
+            return vec2(x.x, -x.y) / (x.x * x.x + x.y * x.y);
+        }
+        
+        vec2 cDiv( vec2 a, vec2 b ) {
+            return cMul(a, cInv(b));
+        }
+        
+        vec2 cSq( vec2 x ) {
+            return vec2(x.x * x.x - x.y * x.y, 2.0 * x.x * x.y);
+        }
+    </script>
+
+    <!-- Axes -->
+    <script id="axes.glsl" type="not/js">
+        if (min(abs(v_pos.x / u_pxsz.x), abs(v_pos.y / u_pxsz.y)) < 1.0) {
+            color = 1.0 - color;
+        }
+    </script>
+
+    <!-- Frag: Testing -->
+    <script id="fragMain.glsl" type="not/js">
+        void main() {
+            vec2 pos = (v_pos + 1.0) * 0.5;
+            gl_FragColor = vec4(0.5 + 0.5*cos(u_time+pos.xyx+vec3(0,2,4)), 1.0);
+        }
+    </script>
+
+    <!-- Frag: Colors-->
+    <script id="fragColors.glsl" type="not/js">
+        void main() {
+            vec2 pos = (v_pos + 1.0) * 0.5;
+            vec3 color = 0.5 + 0.5*cos(u_time+pos.xyx+vec3(0,2,4));
+    </script>
+
+    <!-- Frag: Mandelbrot -->
+    <script id="fragMandelbrot.glsl" type="not/js">
+        int mandelbrot(vec2 param) {
+            vec2 c = [[[C]]];
+            vec2 z = [[[Z]]];
+            for (int i = 0; i < [[[ITERS]]]; i++) {
+                z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
+                if (dot(z, z) > 4.0) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+        vec3 colorRainbow(int m) {
+            return m < 0 ? vec3(0.0) : hsv2rgb(vec3(sqrt(float(m)) / 10.0, 1.0, 1.0));
+        }
+        vec3 colorBlackWhite(int m) {
+            return vec3(1.0 - 2.0 * fract(float(m) * 0.5));
+        }
+        void main() {
+            vec3 color;
+            int m = mandelbrot(v_pos);
+    </script>
+
+    <!-- Frag: My Cool Fractal -->
+    <script id="fragMyFractal.glsl" type="not/js">
+        int myFractal(vec2 z) {
+            vec2 c = vec2(-1.1842105263157894, 0.905263157894737);
+            for (int i = 0; i < [[[ITERS]]]; i++) {
+                z = ePowC(vec2(z.x * z.x * z.x * z.x * z.x * z.x - 
+                        15.0 * z.x * z.x * z.x * z.x * z.y * z.y + 
+                        15.0 * z.x * z.x * z.y * z.y * z.y * z.y - 
+                            z.y * z.y * z.y * z.y * z.y * z.y,
+                            
+                        6.0 * z.x * z.x * z.x * z.x * z.x * z.y - 
+                        20.0 * z.x * z.x * z.x * z.y * z.y * z.y + 
+                        6.0 * z.x * z.y * z.y * z.y * z.y * z.y)) + c;
+                
+                if (dot(z,z) >= 65536.0) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+        vec3 colorRainbow(int m) {
+            return m < 0 ? vec3(0.0) : hsv2rgb(vec3(sqrt(float(m)) / 10.0, 1.0, 1.0));
+        }
+        vec3 colorBlackWhite(int m) {
+            return vec3(1.0 - 2.0 * fract(float(m) * 0.5));
+        }
+        void main() {
+            vec3 color;
+            int m = myFractal(v_pos);
+    </script>
+
+    <!-- Frag: Smooth Mandelbrot -->
+    <script id="fragSmoothMandelbrot.glsl" type="not/js">
+        float smoothMandelbrot(vec2 param) {
+            vec2 c = [[[C]]];
+            vec2 z = [[[Z]]];
+            for (int i = 0; i < [[[ITERS]]]; i++) {
+                z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
+                if (dot(z, z) > 65536.0) {
+                    return float(i) - log2(log2(dot(z,z))) + 4.0; /* https://iquilezles.org/www/articles/mset_smooth/mset_smooth.htm */
+                }
+            }
+            return -1.0;
+        }
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+        vec3 colorRainbow(float m) {
+            return m < 0.0 ? vec3(0.0) : hsv2rgb(vec3(sqrt(float(m)) / 10.0, 1.0, 1.0));
+        }
+        vec3 colorBlackWhite(float m) {
+            return vec3(cos(PI * m) * 0.5 + 0.5);
+        }
+        void main() {
+            vec3 color;
+            float m = smoothMandelbrot(v_pos);
+    </script>
+</html>
